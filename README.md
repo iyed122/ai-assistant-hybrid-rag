@@ -4,12 +4,6 @@ A production-style, fully local enterprise assistant that answers engineering qu
 
 Everything runs locally: Neo4j, MongoDB, Ollama, and QLoRA/DPO fine-tuning sized for a 6 GB consumer GPU.
 
-## ▶ Try it without installing anything
-
-**[Open the interactive pipeline demo](docs/index.html)** — the assistant's actual routing brain (intent classifier + NL→API router) ported to JavaScript and running entirely in your browser: type a question, watch it classify, route to API calls (with real fan-out caps), budget the prompt, and get graded by the eval loop. Works offline; no backend.
-
-> Enable it as a live link: repo **Settings → Pages → Source: Deploy from a branch → `main` / `docs/`** — then the demo serves at `https://<user>.github.io/<repo>/`. Put that URL in the repo's About box.
-
 ## Architecture
 
 ```
