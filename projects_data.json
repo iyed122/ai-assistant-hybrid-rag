@@ -1,0 +1,207 @@
+[
+  {
+    "key": "ANALYTICS",
+    "name": "Analytics Platform",
+    "description": "Real-time event streaming and data pipeline infrastructure",
+    "topics": [
+      "kafka",
+      "data-pipeline",
+      "elasticsearch",
+      "flink"
+    ],
+    "files": {
+      "README.md": "# Analytics Platform\n\nEvent-driven analytics infrastructure for real-time data processing and aggregation.\n\n## Architecture\n\n- **Kafka**: Event ingestion broker with 12 partitions for horizontal scaling\n- **Flink**: Stream processing engine for windowed aggregations\n- **Elasticsearch**: Multi-shard index storage for time-series queries\n- **ClickHouse**: OLAP database for complex analytical queries\n\n## Getting Started\n\n```bash\ndocker-compose up -d\npython -m analytics_bridge --config config/bridge.yaml\n```\n\n## Monitoring\n\n- Kafka Lag Dashboard: http://localhost:8080/kafka-ui\n- Flink JobManager: http://localhost:8081\n- Elasticsearch Kibana: http://localhost:5601\n",
+      "docker-compose.yml": "version: '3.8'\nservices:\n  kafka:\n    image: confluentinc/cp-kafka:7.5.0\n    environment:\n      KAFKA_BROKER_ID: 1\n      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181\n      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092\n      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2\n      KAFKA_AUTO_CREATE_TOPICS_ENABLE: \"true\"\n    ports:\n      - \"9092:9092\"\n    depends_on:\n      - zookeeper\n\n  elasticsearch:\n    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0\n    environment:\n      discovery.type: single-node\n      xpack.security.enabled: \"false\"\n    ports:\n      - \"9200:9200\"\n\n  flink-jobmanager:\n    image: flink:latest\n    ports:\n      - \"8081:8081\"\n    command: jobmanager\n    environment:\n      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager\n",
+      "analytics_bridge/processor.py": "import logging\nfrom kafka import KafkaConsumer\nfrom elasticsearch import Elasticsearch\nfrom typing import Dict, Any\n\nlogger = logging.getLogger(__name__)\n\nclass BatchProcessor:\n    def __init__(self, kafka_brokers: list, es_host: str):\n        self.consumer = KafkaConsumer(\n            'events',\n            bootstrap_servers=kafka_brokers,\n            group_id='analytics-batch-processor',\n            max_poll_records=10000,\n            auto_offset_reset='earliest'\n        )\n        self.es = Elasticsearch([es_host])\n        self.batch_size = 10000\n        \n    def process_batch(self, events: list) -> bool:\n        \"\"\"Process a batch of events and persist to Elasticsearch.\n        \n        Args:\n            events: List of event dictionaries\n            \n        Returns:\n            True if successful, False otherwise\n        \"\"\"\n        try:\n            # Validate events\n            valid_events = self._validate_events(events)\n            if not valid_events:\n                logger.error(f\"Batch validation failed: {len(events)} events, {len(valid_events)} valid\")\n                self._send_to_dlq(events)\n                return False\n            \n            # Persist to Elasticsearch\n            self._bulk_insert_es(valid_events)\n            \n            # CRITICAL: Only commit offset AFTER successful persistence\n            self.consumer.commit()\n            logger.info(f\"Processed batch: {len(valid_events)} events\")\n            return True\n            \n        except Exception as e:\n            logger.error(f\"Batch processing failed: {e}\")\n            self._send_to_dlq(events)\n            return False\n    \n    def _validate_events(self, events: list) -> list:\n        valid = []\n        for event in events:\n            if self._is_valid_event(event):\n                valid.append(event)\n        return valid\n    \n    def _is_valid_event(self, event: Dict[str, Any]) -> bool:\n        return all(k in event for k in ['userId', 'eventType', 'timestamp'])\n    \n    def _bulk_insert_es(self, events: list):\n        for event in events:\n            self.es.index(\n                index=f\"events-{event['timestamp'].split('T')[0]}\",\n                body=event\n            )\n    \n    def _send_to_dlq(self, events: list):\n        dlq_topic = 'events-dlq'\n        for event in events:\n            self.consumer.send(dlq_topic, value=event)\n",
+      "config/bridge.yaml": "kafka:\n  brokers:\n    - localhost:9092\n  topic: events\n  group_id: analytics-batch-processor\n  max_poll_records: 10000\n\nelasticsearch:\n  host: localhost\n  port: 9200\n  index_pattern: \"events-{date}\"\n\nflink:\n  jobmanager_url: http://localhost:8081\n  parallelism: 4\n  checkpoint_interval: 60000\n\nmonitoring:\n  prometheus_port: 9090\n  dlq_alert_threshold: 100000\n"
+    },
+    "issues": [
+      {
+        "issue_key": "ANALYTICS-1",
+        "summary": "Event ingestion pipeline losing 2% of events during batch processing",
+        "description": "Events are being dropped during batch processing when the queue exceeds 50k events. Root cause identified as improper error handling in the batch commit logic.\n\n**Environment:**\n- Kafka cluster: 3 brokers, replication factor 2\n- Consumer group: analytics-batch-processor\n- Batch size: 10000 events\n- Processing framework: Apache Flink\n\n**Symptoms:**\n- Event count mismatch between Kafka and Elasticsearch\n- 2% of daily events missing (approximately 200k events/day)\n- Memory spikes when processing reaches capacity\n- No errors in consumer logs, silent drops\n\n**Root cause:**\nIn processor.py, when a batch fails validation, the offset is committed BEFORE the retry. If the service crashes during retry, those events are lost forever.\n\n**Fix:**\n1. Move offset commit to AFTER successful persistence to Elasticsearch (see line 30 in processor.py)\n2. Implement exponential backoff with max 3 retries\n3. Send failed batches to a DLQ (dead-letter queue) for manual inspection\n4. Add alerts when DLQ backlog exceeds 100k events",
+        "status": "Open",
+        "priority": "Critical",
+        "labels": [
+          "data-pipeline",
+          "kafka",
+          "reliability"
+        ]
+      },
+      {
+        "issue_key": "ANALYTICS-8",
+        "summary": "Dashboard query timeout at 5PM peak hours (P95: 45 seconds)",
+        "description": "User dashboard queries are timing out (45+ seconds) between 5-7 PM EST. Affects 30% of requests during peak business hours when all executives are checking daily metrics.\n\n**Current state:**\n- Query timeout: 30 seconds (hardcoded)\n- P50 latency: 2 seconds (off-peak)\n- P95 latency: 45 seconds (peak hours)\n- P99 latency: 90+ seconds (peak hours)\n\n**Database stats:**\n- Elasticsearch cluster: 6 nodes, 50GB hot data\n- Shards: 10 primary, 2 replica\n- Query pattern: aggregation on 200M+ documents\n\n**Root cause analysis:**\nThe dashboard query aggregates across 12 months of data without range filtering. At 5 PM, query concurrency hits 500+ simultaneous queries on the same 200M document index.\n\n**Solution:**\n1. Add date range filter to queries (default: last 90 days)\n2. Implement query caching with 5-minute TTL in Redis\n3. Increase Elasticsearch heap from 16GB to 32GB\n4. Add query execution time monitoring and SLA alerts\n5. Refactor aggregation to use materialized views updated hourly",
+        "status": "In Progress",
+        "priority": "High",
+        "labels": [
+          "performance",
+          "elasticsearch",
+          "dashboard"
+        ]
+      },
+      {
+        "issue_key": "ANALYTICS-12",
+        "summary": "Implement real-time cohort analysis with streaming aggregations",
+        "description": "Product team needs real-time cohort analysis: track user groups and their behavior over time without waiting for nightly batch jobs.\n\n**Requirements:**\n- Real-time cohort creation and management\n- Streaming aggregations of user actions per cohort\n- API to query cohort metrics updated within 60 seconds\n- Support for 500+ concurrent cohorts\n- Retention: 90 days of cohort data\n\n**Architecture:**\nUse Kafka Streams for real-time aggregation. When a user event arrives, determine which cohorts they belong to and update their metrics in-memory then persist to Redis/Cassandra.\n\n**Technical approach:**\n- Kafka topic: user-events (userId, eventType, eventTime, properties)\n- Kafka Streams topology with KStream \u2192 KTable aggregation\n- Materialized view: Cassandra cohorts_metrics table\n- Query API: GET /api/cohorts/{cohortId}/metrics",
+        "status": "Open",
+        "priority": "Medium",
+        "labels": [
+          "feature",
+          "real-time",
+          "kafka-streams"
+        ]
+      }
+    ]
+  },
+  {
+    "key": "MOBILE",
+    "name": "Mobile Applications",
+    "description": "iOS and Android client applications",
+    "topics": [
+      "ios",
+      "android",
+      "kotlin",
+      "swift",
+      "camera",
+      "encryption"
+    ],
+    "files": {
+      "README.md": "# Mobile Applications\n\nNative iOS and Android applications for cross-platform messaging and collaboration.\n\n## Platforms\n\n### iOS\n- **Language**: Swift 5.9+\n- **Min OS**: iOS 15+\n- **Architecture**: MVVM with RxSwift\n- **Testing**: XCTest + Nimble\n\n### Android\n- **Language**: Kotlin 1.9+\n- **Min API**: 26 (Android 8.0)\n- **Architecture**: Jetpack Compose + MVI\n- **Testing**: JUnit 4 + Mockito\n\n## Security Features\n\n- **Encryption**: Signal Protocol (libsignal) for E2E messaging\n- **Camera Access**: CameraX API with permission validation\n- **Storage**: Encrypted SQLCipher database\n- **Network**: Certificate pinning and TLS 1.3\n",
+      "ios/UniversalLinksViewController.swift": "import UIKit\n\nclass UniversalLinksViewController: UIViewController {\n    \n    override func viewDidLoad() {\n        super.viewDidLoad()\n        handleUniversalLink()\n    }\n    \n    private func handleUniversalLink() {\n        guard let url = userActivity?.webpageURL else { return }\n        \n        // BROKEN: Manual URL parsing fails on iOS 17+ with special characters\n        // This causes EXC_BAD_ACCESS when session_id contains colon\n        let components = url.absoluteString.split(separator: \"?\")\n        if let queryString = components.last {\n            let params = queryString.split(separator: \"&\")\n            for param in params {\n                let pair = param.split(separator: \"=\")\n                if pair.first == \"session_id\" {\n                    // Crash on iOS 17 - colon not properly escaped\n                    let sessionId = String(pair.last ?? \"\")\n                    processSession(sessionId)\n                }\n            }\n        }\n    }\n    \n    // FIXED: Use URLComponents for proper parsing\n    private func handleUniversalLinkFixed() {\n        guard let url = userActivity?.webpageURL,\n              var components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {\n            return\n        }\n        \n        let params = components.queryItems ?? []\n        if let sessionId = params.first(where: { $0.name == \"session_id\" })?.value {\n            processSession(sessionId)\n        }\n    }\n    \n    private func processSession(_ sessionId: String) {\n        // Navigate to account view\n    }\n}\n",
+      "android/CameraViewModel.kt": "import androidx.lifecycle.ViewModel\nimport androidx.camera.core.CameraSelector\nimport androidx.camera.lifecycle.ProcessCameraProvider\nimport android.content.Context\nimport android.Manifest\n\nclass CameraViewModel(private val context: Context) : ViewModel() {\n    \n    private val requestedPermissions = mutableListOf<String>()\n    \n    // PROBLEM: Requesting permission at runtime when already in AndroidManifest.xml\n    fun requestCameraPermission(activity: androidx.appcompat.app.AppCompatActivity) {\n        // This triggers BOTH system prompt AND our custom prompt on Android 13+\n        androidx.core.app.ActivityCompat.requestPermissions(\n            activity,\n            arrayOf(Manifest.permission.CAMERA),\n            CAMERA_PERMISSION_CODE\n        )\n    }\n    \n    // FIXED: Only request at runtime, remove from AndroidManifest.xml\n    fun requestCameraPermissionFixed(activity: androidx.appcompat.app.AppCompatActivity) {\n        if (androidx.core.content.ContextCompat.checkSelfPermission(\n            context, Manifest.permission.CAMERA\n        ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {\n            androidx.core.app.ActivityCompat.requestPermissions(\n                activity,\n                arrayOf(Manifest.permission.CAMERA),\n                CAMERA_PERMISSION_CODE\n            )\n        }\n    }\n    \n    fun onPermissionResult(\n        requestCode: Int,\n        permissions: Array<String>,\n        grantResults: IntArray\n    ) {\n        when (requestCode) {\n            CAMERA_PERMISSION_CODE -> {\n                if (grantResults.isNotEmpty() && \n                    grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {\n                    // Open camera\n                } else {\n                    // Show explanation\n                }\n            }\n        }\n    }\n    \n    companion object {\n        private const val CAMERA_PERMISSION_CODE = 100\n    }\n}\n",
+      "android/AndroidManifest.xml": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    \n    <!-- PROBLEM: This causes duplicate permission prompts on Android 13+ -->\n    <!-- <uses-permission android:name=\"android.permission.CAMERA\" /> -->\n    \n    <!-- FIXED: Request at runtime only, not in manifest -->\n    \n    <uses-feature\n        android:name=\"android.hardware.camera\"\n        android:required=\"true\" />\n\n    <application>\n        <activity\n            android:name=\".MainActivity\"\n            android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n    </application>\n</manifest>\n",
+      "shared/Signal.swift": "import SignalClient\n\nclass SignalKeyManager {\n    private let signalStore: SignalProtocolStore\n    \n    func initializeE2EEncryption() throws {\n        // Generate long-term identity key pair\n        let identityKeyPair = try Curve25519.generateKeyPair()\n        try signalStore.saveIdentity(address: try SignalAddress(name: \"self\", deviceId: 1), \n                                      identityKey: identityKeyPair.publicKey)\n        \n        // Generate prekey bundle (100 prekeys)\n        var prekeys = [PreKeyRecord]()\n        for id in 1...100 {\n            let keyPair = try Curve25519.generateKeyPair()\n            let prekey = try PreKeyRecord(id: UInt32(id), publicKey: keyPair.publicKey)\n            prekeys.append(prekey)\n            try signalStore.storePreKey(prekey)\n        }\n    }\n    \n    func encryptMessage(_ plaintext: String, for address: SignalAddress) throws -> Data {\n        let sessionCipher = try SessionCipher(store: signalStore, remoteAddress: address)\n        let ciphertext = try sessionCipher.encryptMessage(plaintext.data(using: .utf8)!)\n        return ciphertext.serialized()\n    }\n    \n    func decryptMessage(_ ciphertext: Data, from address: SignalAddress) throws -> String {\n        let sessionCipher = try SessionCipher(store: signalStore, remoteAddress: address)\n        let plaintext = try sessionCipher.decryptMessage(SignalMessage(bytes: ciphertext))\n        return String(data: plaintext, encoding: .utf8) ?? \"\"\n    }\n}\n"
+    },
+    "issues": [
+      {
+        "issue_key": "MOBILE-3",
+        "summary": "App crashes when opening shared deep links from SMS (iOS 17+)",
+        "description": "iOS app crashes with EXC_BAD_ACCESS when opening app via SMS deep link on iOS 17.2+. Android unaffected.\n\n**Steps to reproduce:**\n1. Send SMS with app link: \"Check your balance: app://account?session_id=123\"\n2. Recipient taps link on iOS 17.2+\n3. App crashes immediately with EXC_BAD_ACCESS in UniversalLinks handler\n\n**Root cause:**\nIn iOS 17, Apple changed URL parameter parsing. The 'session_id' parameter contains special characters which are now incorrectly parsed.\n\n**Fix:**\n1. Use URLComponents instead of manual URL parsing (see UniversalLinksViewController.swift)\n2. URL-encode all deep link parameters\n3. Add unit tests for all deep link parameters with special characters\n4. Test with iOS 15, 16, 17, 18 beta",
+        "status": "Open",
+        "priority": "Critical",
+        "labels": [
+          "ios",
+          "crash",
+          "critical",
+          "deep-links"
+        ]
+      },
+      {
+        "issue_key": "MOBILE-7",
+        "summary": "Camera permission prompt appears twice on Android 13+",
+        "description": "Android app shows camera permission prompt twice on Android 13+ due to requesting permission both in manifest and at runtime.\n\n**Root cause:**\nCAMERA permission declared in AndroidManifest.xml AND requested at runtime via CameraX.\n\n**Fix:**\n1. Remove CAMERA from <uses-permission> in AndroidManifest.xml (see line with comment PROBLEM)\n2. Request permission at runtime only via CameraX\n3. Handle denied case with proper UI messaging\n\n**Code location:**\nandroid/CameraViewModel.kt (requestCameraPermissionFixed method shows the fix)",
+        "status": "Open",
+        "priority": "Medium",
+        "labels": [
+          "android",
+          "ux",
+          "permissions"
+        ]
+      },
+      {
+        "issue_key": "MOBILE-11",
+        "summary": "Implement end-to-end encryption for chat messages",
+        "description": "Add Signal protocol-based E2E encryption for chat messages. Currently messages are transmitted plaintext over HTTPS.\n\n**Requirements:**\n- E2E encryption using Signal protocol (libsignal)\n- Key exchange on first message with a user\n- Perfect forward secrecy (keys rotate every 100 messages)\n- Support message history decryption\n\n**Implementation:**\nSee Signal.swift for KeyManager with encryption/decryption methods. Need to integrate into ChatMessage proto and update UI to show encryption status.",
+        "status": "Open",
+        "priority": "Medium",
+        "labels": [
+          "feature",
+          "security",
+          "encryption"
+        ]
+      }
+    ]
+  },
+  {
+    "key": "INFRA",
+    "name": "Infrastructure & DevOps",
+    "description": "Kubernetes, Terraform, and deployment infrastructure",
+    "topics": [
+      "kubernetes",
+      "terraform",
+      "aws",
+      "devops",
+      "ci-cd"
+    ],
+    "files": {
+      "README.md": "# Infrastructure as Code\n\nProduction infrastructure running on AWS EKS with Terraform IaC.\n\n## Stack\n\n- **Cloud**: AWS (EKS, RDS, ElastiCache, S3, CloudFront)\n- **IaC**: Terraform 1.6+ with state in S3/DynamoDB\n- **K8s**: EKS 1.28+ with 3x availability zones\n- **Container Registry**: ECR with lifecycle policies\n- **Monitoring**: Prometheus + Grafana + CloudWatch\n\n## Directory Structure\n\n```\nterraform/\n\u251c\u2500\u2500 environments/\n\u2502   \u251c\u2500\u2500 dev/\n\u2502   \u251c\u2500\u2500 staging/\n\u2502   \u2514\u2500\u2500 prod/\n\u251c\u2500\u2500 modules/\n\u2502   \u251c\u2500\u2500 eks/\n\u2502   \u251c\u2500\u2500 rds/\n\u2502   \u2514\u2500\u2500 security/\n\u2514\u2500\u2500 helm/\n    \u251c\u2500\u2500 ingress-nginx/\n    \u251c\u2500\u2500 cert-manager/\n    \u2514\u2500\u2500 monitoring/\n```\n\n## Deployment\n\n```bash\nterraform init -backend-config=prod.tfvars\nterraform plan -var-file=prod.tfvars\nterraform apply -var-file=prod.tfvars -lock-timeout=10m\n```\n",
+      "terraform/main.tf": "terraform {\n  required_version = \">= 1.6.0\"\n  \n  backend \"s3\" {\n    bucket         = \"terraform-state-prod\"\n    key            = \"eks/terraform.tfstate\"\n    region         = \"us-east-1\"\n    dynamodb_table = \"terraform-locks\"\n    encrypt        = true\n  }\n}\n\nprovider \"aws\" {\n  region = var.aws_region\n  \n  default_tags {\n    tags = {\n      Environment = var.environment\n      ManagedBy   = \"Terraform\"\n      Project     = \"Infrastructure\"\n    }\n  }\n}\n\nmodule \"eks\" {\n  source = \"./modules/eks\"\n  \n  cluster_name    = \"prod-cluster\"\n  cluster_version = \"1.28\"\n  region          = var.aws_region\n  \n  node_groups = {\n    general = {\n      desired_size    = 3\n      min_size        = 3\n      max_size        = 10\n      instance_types  = [\"t3.xlarge\"]\n      disk_size       = 100\n    }\n  }\n}\n\nresource \"aws_eks_addon\" \"vpc_cni\" {\n  cluster_name             = module.eks.cluster_id\n  addon_name               = \"vpc-cni\"\n  addon_version            = \"v1.14.1-eksbuild.1\"\n  resolve_conflicts        = \"OVERWRITE\"\n  service_account_role_arn = aws_iam_role.vpc_cni.arn\n}\n",
+      "terraform/variables.tf": "variable \"aws_region\" {\n  description = \"AWS region\"\n  type        = string\n  default     = \"us-east-1\"\n}\n\nvariable \"environment\" {\n  description = \"Environment name (dev, staging, prod)\"\n  type        = string\n  validation {\n    condition     = contains([\"dev\", \"staging\", \"prod\"], var.environment)\n    error_message = \"Environment must be dev, staging, or prod.\"\n  }\n}\n\nvariable \"cluster_name\" {\n  description = \"EKS cluster name\"\n  type        = string\n  default     = \"prod-cluster\"\n}\n",
+      "kubernetes/kubelet-config.yaml": "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kubelet-config\n  namespace: kube-system\ndata:\n  kubelet.conf: |\n    # FIX: Enable container log rotation\n    containerLogMaxSize: 10m\n    containerLogMaxFiles: 3\n    \n    # Storage\n    maxPods: 110\n    podsPerCore: 2\n    \n    # Memory\n    kubeReserved:\n      cpu: 100m\n      memory: 128Mi\n      ephemeral-storage: 1Gi\n    \n    # Shutdown grace period\n    shutdownGracePeriod: 30s\n    \n    # Event recording\n    eventRecordQPS: 5\n",
+      "kubernetes/resource-quota.yaml": "---\napiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: ephemeral-storage-quota\n  namespace: analytics\nspec:\n  hard:\n    ephemeral-storage: 50Gi\n  scopeSelector:\n    matchExpressions:\n    - operator: In\n      scopeName: PriorityClass\n      values: [\"default\"]\n---\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: analytics-worker-tmpfs\nspec:\n  accessModes:\n    - ReadWriteOnce\n  resources:\n    requests:\n      storage: 10Gi\n  storageClassName: tmpfs-sc\n"
+    },
+    "issues": [
+      {
+        "issue_key": "INFRA-5",
+        "summary": "Kubernetes nodes running out of ephemeral storage (90% full)",
+        "description": "Kubernetes worker nodes are running out of ephemeral storage. Container logs and temp files are consuming 90% of disk capacity on 12 nodes, causing pod evictions.\n\n**Current state:**\n- Node disk pressure: high on 12/50 nodes\n- Storage used: ~450GB / 500GB per node\n- Pod evictions: 5-10 per day due to DiskPressure\n\n**Root causes:**\n1. Container logs not being rotated (log rotation disabled in kubelet config)\n2. Analytics workers creating temporary files in /tmp without cleanup\n3. No quotas on ephemeral storage per pod\n\n**Solutions:**\n1. Enable logrotate in kubelet configuration (see containerLogMaxSize/MaxFiles in kubelet-config.yaml)\n2. Update analytics worker Dockerfile to mount tmpfs: /tmp\n3. Add ResourceQuota to limit ephemeral storage per namespace (see resource-quota.yaml)\n4. Deploy node-local-disk-pressure monitor",
+        "status": "In Progress",
+        "priority": "High",
+        "labels": [
+          "infrastructure",
+          "kubernetes",
+          "storage"
+        ]
+      },
+      {
+        "issue_key": "INFRA-14",
+        "summary": "Terraform state lock timeout causing deployment failures",
+        "description": "Terraform deployments fail intermittently with 'state lock timeout' error. The state lock is held indefinitely when a plan operation crashes.\n\n**Symptoms:**\n- `terraform apply` fails with: \"Error acquiring the state lock\"\n- Lock held for 30+ minutes, manual intervention required\n- Blocks all infrastructure changes during lock wait\n- ~2 failures per week\n\n**Root cause:**\nIn Terraform S3 backend, a `terraform plan` operation crashed (OOM) and never released the DynamoDB state lock.\n\n**Current configuration:**\n- Backend: S3 + DynamoDB (see terraform/main.tf)\n- Lock timeout: 30 minutes (hardcoded)\n\n**Fix:**\n1. Add force_unlock script to CI/CD emergency procedures\n2. Implement automated cleanup: if lock age > 1 hour, force release\n3. Add CloudWatch alarm: state lock held > 5 minutes\n4. Upgrade Terraform to 1.6+ (better lock handling)",
+        "status": "Open",
+        "priority": "High",
+        "labels": [
+          "terraform",
+          "ci-cd",
+          "infrastructure"
+        ]
+      }
+    ]
+  },
+  {
+    "key": "SECURITY",
+    "name": "Security & Compliance",
+    "description": "Security hardening and compliance initiatives",
+    "topics": [
+      "security",
+      "compliance",
+      "soc2",
+      "docker",
+      "vault"
+    ],
+    "files": {
+      "README.md": "# Security & Compliance\n\nEnterprise security controls and regulatory compliance framework.\n\n## Compliance Standards\n\n- **SOC 2 Type II**: In progress (audit Q1 2024)\n- **ISO 27001**: Mapping complete, certification planned Q2 2024\n- **GDPR**: Compliant with data processing agreements in place\n- **HIPAA**: Architecture ready, awaiting customer demand\n\n## Key Initiatives\n\n### Access Control\n- Multi-factor authentication (TOTP + hardware keys)\n- Role-based access control (RBAC) with audit logging\n- Service-to-service authentication via mTLS\n- Zero-trust network access (Teleport)\n\n### Data Protection\n- AES-256 encryption at rest (AWS KMS)\n- TLS 1.3 encryption in transit\n- Automated credential rotation via HashiCorp Vault\n- Database field-level encryption for PII\n\n### Incident Response\n- On-call rotation with PagerDuty\n- Incident runbooks in `/docs/incident-response/`\n- 24-hour security monitoring (SIEM: Wazuh)\n- Automated malware scanning in CI/CD\n",
+      "Dockerfile": "FROM python:3.11-slim\n\nWORKDIR /app\n\n# BROKEN: Secrets hardcoded in build layer\n# ENV STRIPE_API_KEY=\"sk_live_4eC39HqLyjWDarhtT657\" \n# ENV AWS_SECRET_ACCESS_KEY=\"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\"\n# ENV SENDGRID_API_KEY=\"SG.1234567890ABCDEF\"\n\n# FIXED: Pass secrets at runtime from CI/CD secrets manager\n# Secrets loaded from environment variables set by container runtime\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\n# Health check\nHEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \\\n    CMD python -c \"import sys; sys.exit(0)\"\n\nEXPOSE 8000\nCMD [\"python\", \"-m\", \"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\"]\n",
+      ".dockerignore": "# FIXED: Exclude sensitive files from docker build context\n.env\n.env.local\n.env.*.local\n*.key\n*.pem\n.aws\n.ssh\nsecrets/\n.git\n.gitignore\nnode_modules/\n__pycache__/\n*.pyc\n.pytest_cache/\n.venv/\nvenv/\n",
+      "vault/rotate-secrets.sh": "#!/bin/bash\n# Automated credential rotation script\n\nset -e\n\nVAULT_ADDR=\"${VAULT_ADDR:-http://localhost:8200}\"\nSECRET_PATH=\"secret/data/prod\"\n\nrotate_stripe_key() {\n    echo \"Rotating Stripe API key...\"\n    \n    # Generate new key via Stripe API\n    NEW_KEY=$(curl -X POST https://api.stripe.com/v1/api_keys \\\n        -u \"$STRIPE_ADMIN_KEY:\" \\\n        -d \"purpose=server\" | jq -r '.secret')\n    \n    # Store in Vault\n    vault kv put $SECRET_PATH/stripe api_key=\"$NEW_KEY\"\n    \n    # Invalidate old key\n    echo \"Old Stripe key invalidated\"\n}\n\nrotate_aws_credentials() {\n    echo \"Rotating AWS credentials...\"\n    \n    # Generate new IAM access key\n    NEW_KEY=$(aws iam create-access-key --user-name service-account \\\n        | jq -r '.AccessKey | \"\\(.AccessKeyId):\\(.SecretAccessKey)\"')\n    \n    # Store in Vault\n    vault kv put $SECRET_PATH/aws credentials=\"$NEW_KEY\"\n    \n    # Delete old key\n    echo \"Old AWS key invalidated\"\n}\n\n# Run rotations\nrotate_stripe_key\nrotate_aws_credentials\nrotate_sendgrid_key\n\necho \"\u2713 All credentials rotated successfully\"\n",
+      "trivy-config.yaml": "---\nscan:\n  type: config,secret\n  skip-db-update: false\n\nseverity:\n  - CRITICAL\n  - HIGH\n\nexit-code: 1\n\nignorefile: .trivyignore\n\nsecret:\n  additionalPatterns:\n    - api[_-]?key\n    - secret[_-]?key\n    - password\n    - token\n"
+    },
+    "issues": [
+      {
+        "issue_key": "SECURITY-2",
+        "summary": "API secrets hardcoded in Docker image history",
+        "description": "Docker image contains hardcoded API secrets in build layers that were later removed but remain in image history.\n\n**Vulnerability details:**\n- Severity: HIGH\n- Images affected: analytics-processor:v1.2.0 through v2.1.5 (6 versions)\n- Secrets exposed: Stripe API key, AWS secret key, SendGrid token\n- Time exposed: 8 months\n- Risk: Unauthorized API access to payment and email systems\n\n**Discovery method:**\nDocker image analyzed with trivy and 3 hardcoded secrets found in git history inside the image.\n\n**Root causes:**\n1. Secrets passed in ENV during docker build instead of at runtime (see Dockerfile lines with BROKEN comment)\n2. .dockerignore didn't exclude .env files\n3. No image scanning in CI/CD pipeline\n4. No secret rotation policy\n\n**Remediation:**\n1. Rotate all exposed secrets immediately (Stripe, AWS, SendGrid)\n2. Rebuild images using secrets from CI/CD secrets manager\n3. Add trivy scan to CI/CD pipeline (fail on hardcoded secrets)\n4. Re-push all images with secrets removed\n5. Implement vault-based rotation (see vault/rotate-secrets.sh)\n\n**Detection script:**\n```bash\ndocker history IMAGE | grep -i \"secret\\|password\\|key\"\ntrivy image --severity HIGH,CRITICAL IMAGE\n```",
+        "status": "Open",
+        "priority": "Critical",
+        "labels": [
+          "security",
+          "secrets",
+          "docker",
+          "compliance"
+        ]
+      },
+      {
+        "issue_key": "SECURITY-9",
+        "summary": "Implement OWASP SSDLF for all new features",
+        "description": "Integrate OWASP Secure Software Development Lifecycle framework into development process for all new features.\n\n**Requirements:**\n- Threat modeling for all new features\n- Code review checklist based on OWASP Top 10\n- Automated security scanning in CI/CD\n- Dependency vulnerability tracking\n- Security training for all developers\n\n**Implementation:**\n1. Add threat modeling template to feature PRs\n2. Integrate SAST (static analysis security testing)\n3. Implement SCA (software composition analysis)\n4. Add security code review step before merge\n5. Monthly security training sessions",
+        "status": "Open",
+        "priority": "High",
+        "labels": [
+          "security",
+          "compliance",
+          "process"
+        ]
+      }
+    ]
+  }
+]

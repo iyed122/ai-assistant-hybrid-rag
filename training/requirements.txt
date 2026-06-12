@@ -1,0 +1,22 @@
+# Training Pipeline dependencies
+# Install: pip install -r training/requirements.txt
+
+# Core training
+torch>=2.1.0
+transformers>=4.40.0
+peft>=0.10.0
+trl>=0.8.0
+bitsandbytes>=0.43.0
+datasets>=2.18.0
+accelerate>=0.28.0
+
+# MLflow tracking + model registry
+mlflow>=2.12.0
+
+# Already in your project (listed for completeness)
+pymongo
+python-dotenv
+sentence-transformers
+
+# Optional: flash-attention (if supported — RTX 3050 does NOT support it)
+# pip install flash-attn  # skip for 3050

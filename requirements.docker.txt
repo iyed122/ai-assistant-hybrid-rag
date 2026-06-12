@@ -1,0 +1,46 @@
+# All versions pinned to exact matches from the working local venv.
+# torch (2.5.1+cpu) is installed in a separate Dockerfile RUN step BEFORE this
+# file to prevent pip from later pulling the CUDA torch as a transitive dep.
+
+# ── Web framework ──────────────────────────────────────────────────────────────
+fastapi==0.135.1
+uvicorn[standard]==0.41.0
+python-multipart==0.0.32
+
+# ── Validation / config ────────────────────────────────────────────────────────
+pydantic==2.12.5
+python-dotenv==1.0.0
+typing-extensions==4.15.0
+
+# ── HTTP ───────────────────────────────────────────────────────────────────────
+requests==2.32.5
+httpx==0.28.1
+
+# ── Databases ──────────────────────────────────────────────────────────────────
+pymongo==4.15.5
+neo4j==6.1.0
+
+# ── LangChain / LangGraph ──────────────────────────────────────────────────────
+# langchain-classic is the PyPI package that provides the 'langchain' namespace.
+langchain-classic==1.0.3
+langchain-community==0.4.1
+langchain-core==1.4.0
+langgraph==1.2.0
+
+# ── Embeddings ─────────────────────────────────────────────────────────────────
+# sentence-transformers 5.x was developed against torch 2.5.x.
+# torch itself is NOT listed here — it is pre-installed in Dockerfile step 1
+# (torch==2.5.1+cpu) so pip never touches it when processing this file.
+sentence-transformers==5.2.3
+transformers==4.46.3
+huggingface-hub==0.36.2
+numpy==1.26.4
+scikit-learn==1.8.0
+scipy==1.15.3
+tqdm==4.67.3
+
+# ── GitLab API ─────────────────────────────────────────────────────────────────
+python-gitlab==4.4.0
+
+# ── MLflow (model registry + experiment tracking) ──────────────────────────────
+mlflow==3.13.0

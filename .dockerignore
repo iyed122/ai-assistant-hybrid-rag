@@ -1,0 +1,54 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+# .env is loaded by docker-compose at runtime via env_file — never baked in.
+.env
+
+# ── Large model / data files ──────────────────────────────────────────────────
+# mlruns/ is bind-mounted as a volume in docker-compose — not baked into image.
+mlruns/
+qdrant_backup/
+DATA/
+*.bin
+*.pt
+*.safetensors
+*.ckpt
+*.pth
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+# Built by its own Dockerfile — not needed in the backend build context.
+frontend/
+node_modules/
+
+# ── Dev / editor ──────────────────────────────────────────────────────────────
+.git/
+.vscode/
+.idea/
+*.md
+*.pdf
+*.html
+Hammer_Evaluation_Report.html
+
+# ── Old / unused files ────────────────────────────────────────────────────────
+requirements.txt
+docker-compose.ymll
+package.json
+package-lock.json
+projects_data.json
+benchmark_calculator.py
+benchmark_eval.py
+build_benchmark_v4.py
+enterprise_benchmark.py
+append_collection.py
+delete_from_collection.py
+
+# ── OS junk ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

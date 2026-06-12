@@ -1,0 +1,84 @@
+services:
+
+  # ── Neo4j 5 + APOC (knowledge graph + vector index) ──────────────────────────
+  neo4j:
+    image: neo4j:5.20
+    container_name: ai-neo4j
+    ports:
+      - "7474:7474"   # browser UI
+      - "7687:7687"   # bolt
+    environment:
+      # Set NEO4J_PASSWORD in .env (compose reads it automatically)
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}"
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: "512m"
+      NEO4J_server_memory_heap_max__size: "1g"
+    volumes:
+      - neo4j_data:/data
+    restart: unless-stopped
+    networks: [ai_net]
+
+  # ── MongoDB (chat history, evaluation, training metadata) ────────────────────
+  mongo:
+    image: mongo:7
+    container_name: ai-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+    networks: [ai_net]
+
+  # ── FastAPI backend ───────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-backend
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - MONGO_URI=${MONGO_URI_DOCKER:-mongodb://mongo:27017/}
+      # Ollama stays on the host for GPU access; install + `ollama serve` there.
+      - OLLAMA_HOST=${OLLAMA_HOST_DOCKER:-http://host.docker.internal:11434}
+      - PYTHONUNBUFFERED=1
+      - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - ./mlruns:/app/mlruns
+    depends_on: [neo4j, mongo]
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [ai_net]
+    # Optional NVIDIA GPU for in-container embedding/rerank. Remove this block
+    # (or run `docker compose up` without it) on CPU-only machines.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ── React frontend (nginx) ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-frontend
+    ports:
+      - "3000:80"
+    depends_on: [backend]
+    restart: unless-stopped
+    networks: [ai_net]
+
+volumes:
+  neo4j_data:
+  mongo_data:
+  hf_cache:
+
+networks:
+  ai_net:

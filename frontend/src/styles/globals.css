@@ -1,0 +1,173 @@
+/* ── Fonts & Reset ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Dark theme (default) */
+  --bg-base:        #0a0e17;
+  --bg-surface:     #111827;
+  --bg-elevated:    #1a2235;
+  --bg-hover:       #1e2d45;
+  --bg-input:       #141d2e;
+
+  --border:         #1f2f47;
+  --border-subtle:  #162030;
+
+  --text-primary:   #e2e8f4;
+  --text-secondary: #8896b0;
+  --text-muted:     #4a5568;
+
+  --accent:         #3b82f6;
+  --accent-glow:    rgba(59, 130, 246, 0.15);
+  --accent-hover:   #2563eb;
+
+  --intent-rag:     #10b981;
+  --intent-sent:    #8b5cf6;
+  --intent-both:    #f59e0b;
+  --intent-bg-rag:  rgba(16, 185, 129, 0.1);
+  --intent-bg-sent: rgba(139, 92, 246, 0.1);
+  --intent-bg-both: rgba(245, 158, 11, 0.1);
+
+  --source-bg:      #0f1824;
+  --source-border:  #1a2c45;
+
+  --scrollbar:      #1f2f47;
+  --scrollbar-thumb: #2d4163;
+
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:      0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:      0 8px 32px rgba(0,0,0,0.6);
+
+  --radius-sm:      6px;
+  --radius-md:      10px;
+  --radius-lg:      16px;
+  --radius-xl:      24px;
+
+  --font-ui:        'DM Sans', sans-serif;
+  --font-display:   'Syne', sans-serif;
+  --font-mono:      'JetBrains Mono', monospace;
+
+  --transition:     150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="light"] {
+  --bg-base:        #f0f4f8;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #f8fafc;
+  --bg-hover:       #eef2f7;
+  --bg-input:       #ffffff;
+
+  --border:         #d1dae8;
+  --border-subtle:  #e8edf5;
+
+  --text-primary:   #1a2233;
+  --text-secondary: #4a5568;
+  --text-muted:     #94a3b8;
+
+  --accent:         #2563eb;
+  --accent-glow:    rgba(37, 99, 235, 0.1);
+  --accent-hover:   #1d4ed8;
+
+  --intent-rag:     #059669;
+  --intent-sent:    #7c3aed;
+  --intent-both:    #d97706;
+  --intent-bg-rag:  rgba(5, 150, 105, 0.08);
+  --intent-bg-sent: rgba(124, 58, 237, 0.08);
+  --intent-bg-both: rgba(217, 119, 6, 0.08);
+
+  --source-bg:      #f8fafc;
+  --source-border:  #e2e8f0;
+
+  --scrollbar:      #e2e8f0;
+  --scrollbar-thumb: #cbd5e1;
+
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:      0 4px 16px rgba(0,0,0,0.1);
+  --shadow-lg:      0 8px 32px rgba(0,0,0,0.15);
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font-ui);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ── Markdown styles ─────────────────────────────────────────────────────── */
+.prose { line-height: 1.75; }
+.prose p { margin-bottom: 0.75rem; }
+.prose p:last-child { margin-bottom: 0; }
+.prose ul, .prose ol { padding-left: 1.5rem; margin-bottom: 0.75rem; }
+.prose li { margin-bottom: 0.25rem; }
+.prose h1, .prose h2, .prose h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+  color: var(--text-primary);
+}
+.prose h1 { font-size: 1.3rem; }
+.prose h2 { font-size: 1.15rem; }
+.prose h3 { font-size: 1rem; }
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: var(--accent);
+}
+.prose pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+.prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 0.85em;
+}
+.prose blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1rem;
+  color: var(--text-secondary);
+  margin: 0.75rem 0;
+  font-style: italic;
+}
+.prose a { color: var(--accent); text-decoration: underline; }
+.prose strong { font-weight: 600; color: var(--text-primary); }
+.prose table { width: 100%; border-collapse: collapse; margin-bottom: 0.75rem; font-size: 0.9rem; }
+.prose th, .prose td { padding: 0.5rem 0.75rem; border: 1px solid var(--border); text-align: left; }
+.prose th { background: var(--bg-elevated); font-weight: 600; }
+.prose hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.fade-in { animation: fadeSlideIn 0.25s ease forwards; }

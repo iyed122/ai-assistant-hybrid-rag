@@ -1,0 +1,57 @@
+# ── Secrets — never commit ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Data / models / vector stores (GBs — stay local) ────────────────────
+DATA/
+qdrant_backup/
+mlruns/
+mlflow.db
+training/checkpoints/
+training/snapshots/
+training/datasets/
+datasets/
+*.jsonl
+*.gguf
+*.safetensors
+*.bin
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv*/
+.pytest_cache/
+.mypy_cache/
+
+# ── Node / frontend build ────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/
+
+# ── Local reports & office docs (internal references — kept off GitHub) ──
+*.pdf
+*.pptx
+*.docx
+*.xlsx
+Hammer_Evaluation_Report.html
+
+# ── Personal / career (never commit to the public repo) ─────────────────
+career/
+
+# ── Local-only artifacts ─────────────────────────────────────────────────
+originals_backup.zip
+*_test.py
+*.swaptmp
+setup_github.ps1
+.git_local_backup/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+*.log
